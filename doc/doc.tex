@@ -1,0 +1,294 @@
+\documentclass[12pt]{article}
+\usepackage[czech]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{a4wide}
+\usepackage{listings}
+\usepackage{xcolor}
+\sloppy
+% Nastavení pro zvýraznění kódu
+\lstset{
+    language=C,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=10pt,
+    showspaces=false,
+    showstringspaces=false,
+    frame=single,
+    breaklines=true,
+    tabsize=4
+}
+
+\title{\textbf{Dokumentace k semestrální práci: PseudoFAT souborový systém}}
+\author{Jan Čácha}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Úvod}
+Tato dokumentace popisuje implementaci zjednodušeného souborového systému založeného na pseudoFAT. Cílem práce je vytvořit funkční program, který umožňuje manipulaci se soubory a adresáři prostřednictvím příkazů zadávaných uživatelem. Program podporuje základní operace jako vytvoření adresáře, odstranění souboru nebo adresáře, zobrazení obsahu adresáře, přesun mezi adresáři a další. Vstupy a výstupy programu musí splňovat stanovený formát.
+
+\section*{Specifikace příkazů}
+Program podporuje následující příkazy:
+
+\begin{itemize}
+    \item \textbf{mkdir} \textit{cesta} \newline
+    Vytvoří nový adresář na zadané cestě. Cesta může být absolutní nebo relativní.
+
+    \item \textbf{rmdir} \textit{cesta} \newline
+    Odstraní prázdný adresář na zadané cestě.
+
+    \item \textbf{rm} \textit{cesta} \newline
+    Odstraní soubor na zadané cestě.
+
+    \item \textbf{ls} \newline
+    Zobrazí obsah aktuálního adresáře.
+
+    \item \textbf{pwd} \newline
+    Zobrazí absolutní cestu k aktuálnímu adresáři.
+
+    \item \textbf{incp} \textit{zdroj} \textit{cíl} \newline
+    Zkopíruje soubor ze systému do pseudoFAT souborového systému.
+
+    \item \textbf{outcp} \textit{zdroj} \textit{cíl} \newline
+    Zkopíruje soubor z pseudoFAT systému do systému.
+
+    \item \textbf{load} \textit{soubor} \newline
+    Načte stav souborového systému z daného souboru.
+
+    \item \textbf{bug} \newline
+    Testovací příkaz pro odhalení potenciálních chyb v implementaci.
+
+    \item \textbf{check} \newline
+    Zkontroluje integritu souborového systému.
+
+    \item \textbf{cp} \textit{zdroj} \textit{cíl} \newline
+    Zkopíruje soubor nebo adresář v rámci pseudoFAT souborového systému.
+
+    \item \textbf{mv} \textit{zdroj} \textit{cíl} \newline
+    Přesune soubor nebo adresář na novou cestu.
+
+    \item \textbf{cd} \textit{cesta} \newline
+    Změní aktuální adresář na zadanou cestu.
+
+    \item \textbf{cat} \textit{cesta} \newline
+    Zobrazí obsah souboru na zadané cestě.
+
+    \item \textbf{info} \textit{cesta} \newline
+    Zobrazí informace o souboru nebo adresáři na zadané cestě.
+\end{itemize}
+\newpage
+\section*{Popis implementace}
+
+\subsection*{Definice datových struktur}
+V implementaci jsou použity základní datové struktury. Z nich nejdůležitější jsou:
+
+\textbf{Struktura FSDescription:}
+\begin{lstlisting}[caption={Struktura popisující souborový systém}, label={lst:fsdescription}]
+typedef struct FSDescription {
+    char signature[9];
+    int32_t disk_size;
+    int32_t cluster_size;
+    int32_t cluster_count;
+    int32_t fat_count;
+    int32_t *fat1_start_address;
+    int32_t *fat2_start_address;
+    int32_t data_start_address;
+} FSDescription;
+\end{lstlisting}
+
+\textbf{Struktura DirectoryItem:}
+\begin{lstlisting}[caption={Struktura adresáře a souboru}, label={lst:directoryitem}]
+typedef struct DirectoryItem {
+    char item_name[MAX_ITEM_NAME_SIZE];
+    bool isFile;
+    int32_t size;
+    int32_t start_cluster;
+    struct DirectoryItem *parent;
+    struct DirectoryItem *children[MAX_CHILDREN];
+    int child_count;
+} DirectoryItem;
+\end{lstlisting}
+
+\subsection*{Globální proměnné}
+Hlavní globální proměnné, které řídí stav systému, zahrnují:
+
+\begin{itemize}
+    \item \texttt{fs\_description} : Popis souborového systému.
+    \item \texttt{fat\_table1} a \texttt{fat\_table2}: Odkazy na obě FAT tabulky.
+    \item \texttt{root\_directory}: Kořenový adresář souborového systému.
+    \item \texttt{current\_directory}: Ukazatel na aktuální pracovní adresář.
+\end{itemize}
+
+\subsection*{Popis implementace hlavní funkce `main`}
+Funkce \texttt{main()} tvoří interaktivní rozhraní mezi uživatelem a pseudoFAT souborovým systémem. Je navržena tak, aby umožnila uživatelům komunikaci se souborovým systémem a vykonávala příkazy pro manipulaci se soubory a adresáři. Funkce obsahuje několik klíčových částí, jejichž detailní vysvětlení je uvedeno níže:
+
+\subsubsection*{1. Kontrola argumentů}
+Na začátku funkce se provádí kontrola vstupních argumentů. Pokud uživatel nezadá správný počet argumentů, funkce vypíše chybovou zprávu a program se ukončí. Toto je klíčové pro zajištění, že uživatel specifikuje správný název souborového systému, na kterém bude program pracovat.
+
+\subsubsection*{2. Načítání aktuálního stavu souborového systému}
+Po kontrole argumentů je zavolána funkce \texttt{load\_system\_state()}, která načítá aktuální stav souborového systému ze souboru. Tato část zajišťuje obnovení stavu systému po předchozím ukončení nebo při restartu.
+
+\subsubsection*{3. Interaktivní smyčka pro zpracování příkazů}
+Pomocí nekonečné smyčky \texttt{while (1)} je program připraven neustále přijímat uživatelské příkazy. Smyčka umožňuje uživatelům zadávat příkazy pro různé operace, například vytvoření adresářů, mazání souborů, přesun mezi adresáři nebo kopírování souborů.
+
+\subsubsection*{4. Zpracování uživatelských příkazů}
+Po zadání příkazu smyčka zpracovává vstup od uživatele. Nový řádek je odstraněn pomocí funkce \texttt{strcspn()}, aby bylo možné vstup správně analyzovat. Příkaz je následně předán funkci \texttt{process\_command()}, která analyzuje a provede odpovídající akci.
+
+\subsubsection*{5. Uložení aktuálního stavu systému při ukončení}
+Po ukončení interaktivní smyčky příkazem \texttt{exit} je volána funkce \texttt{save\_system\_state()}. Tato funkce zajišťuje, že všechny změny provedené během relace jsou uloženy do souboru, čímž je zabráněno jejich ztrátě.
+
+\subsubsection*{Shrnutí funkcionality}
+Celý tok v rámci funkce \texttt{main()} umožňuje:
+\begin{itemize}
+    \item Načíst stav systému ze souboru.
+    \item Zpracovávat uživatelské příkazy interaktivním způsobem.
+    \item Uložit aktuální stav systému při ukončení.
+\end{itemize}
+
+\subsection*{Popis implementace souboru `filesystem.c`}
+
+\subsubsection*{Funkce: \texttt{initialize\_filesystem}}
+
+\texttt{initialize\_filesystem} inicializuje souborový systém s danými parametry velikosti disku a velikosti clusterů.
+
+\begin{itemize}
+    \item \textbf{Validace parametrů:} Funkce nejprve ověřuje, zda jsou parametry platné.
+    \item \textbf{Nastavení základních informací souborového systému:} Nastavují se základní atributy, jako je podpis systému, velikost clusterů, počet clusterů a velikost FAT tabulek.
+    \item \textbf{Alokace paměti:} Alokují se paměťové bloky pro FAT tabulky a samotný datový prostor systému.
+    \item \textbf{Inicializace tabulek:} FAT tabulky jsou inicializovány hodnotou ``FAT\_UNUSED'', aby značení clusterů začalo v očekávaném stavu.
+    \item \textbf{Vytvoření root adresáře:} Root adresář je nastaven jako výchozí adresář souborového systému.
+\end{itemize}
+
+\subsubsection*{Funkce: \texttt{format\_filesystem}}
+
+\texttt{format\_filesystem} formátuje souborový systém a ukládá jeho počáteční stav do souboru.
+
+\begin{itemize}
+    \item \textbf{Otevření souboru:} Funkce otevírá soubor pro zápis.
+    \item \textbf{Inicializace systému:} Funkce volá \texttt{initialize\_filesystem}.
+    \item \textbf{Uložení stavu:} Po inicializaci je systém uložen do souboru pomocí funkce \texttt{save\_system\_state}.
+\end{itemize}
+
+\subsection*{Funkce: \texttt{save\_directory}}
+
+Funkce \texttt{save\_directory} rekurzivně ukládá stav adresářů a jejich dětí do souboru.
+
+\begin{itemize}
+    \item Uloží aktuální adresář.
+    \item Pro každý podadresář volá funkci rekurzivně, aby se uložila jeho struktura.
+\end{itemize}
+
+\subsubsection*{Funkce: \texttt{save\_system\_state}}
+
+\texttt{save\_system\_state} ukládá aktuální stav souborového systému do souboru.
+
+\begin{itemize}
+    \item \textbf{Uložení FSDescription:} Uloží základní systémové informace.
+    \item \textbf{Uložení FAT tabulek:} FAT tabulky jsou zapsány do souboru.
+    \item \textbf{Uložení adresářové struktury:} Rekurzivně se ukládají adresáře pomocí funkce \texttt{save\_directory}.
+    \item \textbf{Uložení dat:} Uloží se také obsah datového prostoru.
+\end{itemize}
+
+\subsubsection*{Funkce: \texttt{load\_directory}}
+
+\texttt{load\_directory} rekurzivně načítá adresářovou strukturu a její podadresáře ze souboru.
+
+\begin{itemize}
+    \item Načítá aktuální adresář ze souboru.
+    \item Rekurzivně načítá podadresáře a nastavuje vztahy mezi nimi.
+\end{itemize}
+
+\subsubsection*{Funkce: \texttt{load\_system\_state}}
+
+\texttt{load\_system\_state} načítá souborový systém ze souboru.
+
+\begin{itemize}
+    \item \textbf{Načítání FSDescription:} Získávají se základní informace o souborovém systému.
+    \item \textbf{Alokace paměti:} Alokují se paměťové prostory pro FAT tabulky a datový prostor.
+    \item \textbf{Načítání dat:} Načítají se FAT tabulky, adresářová struktura a datový prostor ze souboru.
+    \item \textbf{Nastavení kořenového adresáře:} Po načtení je aktuální adresář nastaven na kořenový adresář.
+\end{itemize}
+
+\subsection*{Popis implementace souboru `directory.c`}
+
+
+
+\subsubsection*{Funkce pro správu clusterů}
+\begin{itemize}
+    \item \textbf{Uvolnění clusteru:} Tato funkce označí zadaný cluster jako volný (\texttt{FAT\_UNUSED}) v tabulce FAT, čímž umožní jeho opětovné použití.
+\end{itemize}
+
+\subsubsection*{Funkce pro práci s adresáři}
+\begin{itemize}
+    \item \textbf{Uvolnění adresářů:} Funkce zajišťuje správné uvolnění alokované paměti spojené s adresářem.
+    \item \textbf{Aktualizace velikosti adresářů:} Funkce iteruje přes soubory a podadresáře v rámci adresáře, vypočítává jejich velikosti a alokuje potřebné clusterové bloky.
+    \item \textbf{Alokace clusterů pro adresář:} Funkce provádí alokaci dodatečných clusterů, pokud adresář překročí svou aktuální velikost.
+\end{itemize}
+
+\subsubsection*{Funkce pro čtení a zápis clusterů}
+\begin{itemize}
+    \item \textbf{Čtení dat z clusteru:} Funkce čte data z konkrétního clusteru do paměti a provádí bezpečnostní kontroly.
+    \item \textbf{Zápis dat do clusteru:} Funkce zapisuje data do zadaného clusteru a ověřuje validitu indexů a velikosti dat.
+\end{itemize}
+
+\subsubsection*{Funkce pro hledání v adresářové struktuře}
+\begin{itemize}
+    \item \textbf{Najít adresář nebo soubor podle názvu:} Funkce hledá soubor nebo adresář v aktuálním adresáři na základě zadaného názvu.
+    \item \textbf{Práce s cestami:} Funkce analyzují zadané cesty (např. \texttt{/adresar/soubor}) a iterují v adresářové struktuře.
+\end{itemize}
+
+\subsubsection*{Funkce pro alokaci clusterů}
+\begin{itemize}
+    \item \textbf{Alokace nového clusteru:} Funkce provádí hledání volného clusteru v tabulce FAT, který následně označí jako konec souboru a vrátí jeho index.
+\end{itemize}
+
+\subsubsection*{Funkce pro rekurzivní operace}
+\begin{itemize}
+    \item \textbf{Odstranění adresářů a souborů:} Funkce provádějí rekurzivní mazání všech souborů a podadresářů uvnitř zadaného adresáře.
+    \item \textbf{Kopírování souborů a adresářů:} Funkce provádějí rekurzivní kopírování dat mezi soubory a adresáři, včetně alokace clusterů.
+\end{itemize}
+
+\subsubsection*{Funkce pro manipulaci s daty}
+\begin{itemize}
+    \item \textbf{Čtení dat z clusterů:} Funkce provádí bezpečné čtení dat z clusteru.
+    \item \textbf{Zápis dat do clusterů:} Funkce zapisují data do clusterů a zajišťují správnou manipulaci s tabulkou FAT.
+\end{itemize}
+
+\subsubsection*{Shrnutí funkcionalit}
+
+Celkově implementace těchto funkcí umožňuje:
+
+\begin{itemize}
+    \item Správu volných clusterů a tabulky FAT.
+    \item Práci s adresářovou strukturou, včetně funkcí jako \texttt{mkdir} (vytvoření adresáře) a \texttt{rmdir} (odstranění adresáře)...
+    \item Manipulaci dat mezi pamětí a diskem prostřednictvím čtení a zápisu do clusterů.
+    \item Rekurzivní mazání a kopírování dat a adresářů.
+    \item Správu adresářů pomocí funkcí, které iterují adresářovou strukturu.
+\end{itemize}
+
+\subsubsection*{Použití v rámci souborového systému}
+
+Implementace těchto funkcí je nezbytnou součástí hlavního souborového systému založeného na modelu FAT. Funkce tvoří základní funkční vrstvu, která umožňuje:
+
+\begin{itemize}
+    \item Vytváření a mazání adresářů.
+    \item Manipulaci se soubory a datovými bloky (clusteru).
+    \item Správu dat a adresářů pomocí rekurzivních operací.
+    \item Přesouvání souboru z pevného disku do PseudoFAT souboru
+\end{itemize}
+
+Pomocné funkce jsou optimalizovány pro bezpečnostní podmínky a kontrolu všech vstupních dat, aby se předešlo chybám v systému.
+
+
+\section*{Závěr}
+Tento projekt implementuje základní funkce pseudoFAT souborového systému a umožňuje rozhraní pro manipulaci souborů a adresářů. Celkový kód je optimalizován pro výuku a studium datových struktur a souborových systémů.
+
+\end{document}
